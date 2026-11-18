@@ -71,6 +71,7 @@ type App struct {
 	quitOnLastWindowClosed bool         // default true — exit when last window closes
 	lastFrame              time.Time
 	frameSkipped           bool
+	pacer                  framePacer // Config.MaxFPS / SetMaxFPS
 
 	// Event-driven rendering
 	invalidator   *Invalidator
@@ -114,10 +115,19 @@ type customMenuEntry struct {
 
 // NewApp creates a new application with the given configuration.
 func NewApp(config Config) *App {
-	return &App{
+	a := &App{
 		config:                 config,
 		quitOnLastWindowClosed: true,
 	}
+	a.pacer.setMaxFPS(config.MaxFPS)
+	return a
+}
+
+// SetMaxFPS changes the continuous render loop cap at runtime. Zero or
+// negative disables it. Safe to call from any goroutine. It does not change the
+// present mode chosen at surface configuration.
+func (a *App) SetMaxFPS(fps int) {
+	a.pacer.setMaxFPS(fps)
 }
 
 // SetQuitOnLastWindowClosed controls whether the app exits when the last
@@ -488,6 +498,11 @@ func (a *App) runFrame() {
 	if !continuousRender && !animating && !invalidated {
 		// IDLE: block on OS events (0% CPU, <1ms response)
 		a.manager.WaitEvents()
+	} else if continuousRender && runtime.GOOS != "js" {
+		// MaxFPS: sleep before event processing so the frame uses fresh input.
+		if d := a.pacer.delay(time.Now()); d > 0 {
+			time.Sleep(d)
+		}
 	}
 
 	// Process all pending platform events.
@@ -749,7 +764,7 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer, initErr = newRenderer(
-			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
+			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.LowLatencyVSync, a.config.PowerPreference,
 			a.config.Transparent,
 		)
 	})

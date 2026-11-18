@@ -80,6 +80,9 @@ type RenderTarget struct {
 	// VSync preference for this window
 	vsync bool
 
+	// lowLatencyVSync prefers Mailbox when vsync is on (Config.LowLatencyVSync).
+	lowLatencyVSync bool
+
 	// transparent requests CompositeAlphaModePremultiplied for this surface
 	// when the adapter advertises support (ADR-060, gogpu#361).
 	transparent bool
@@ -260,15 +263,16 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool) (*Renderer, error) {
+func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync, lowLatencyVSync bool, powerPref gputypes.PowerPreference, transparent bool) (*Renderer, error) {
 	r := &Renderer{
 		powerPreference: powerPref,
 	}
 	r.primary = &RenderTarget{
-		renderer:    r,
-		platWindow:  platWin,
-		vsync:       vsync,
-		transparent: transparent,
+		renderer:        r,
+		platWindow:      platWin,
+		vsync:           vsync,
+		lowLatencyVSync: lowLatencyVSync,
+		transparent:     transparent,
 	}
 
 	// Phase 1: Create GPU instance with backend mask (may include multiple backends).
@@ -435,7 +439,7 @@ func (r *Renderer) configureSurface(ws *RenderTarget) error {
 // configure configures the wgpu surface with current dimensions and format.
 func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) error {
 	caps := adapter.GetSurfaceCapabilities(ws.surface)
-	presentMode := resolvePresentMode(caps, ws.vsync)
+	presentMode := resolvePresentModeFor(caps, ws.vsync, ws.lowLatencyVSync)
 	alphaMode := resolveAlphaMode(caps, ws.transparent)
 
 	return ws.surface.Configure(device, &wgpu.SurfaceConfiguration{
@@ -453,6 +457,12 @@ func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) er
 // For VSync off (AutoNoVsync): Immediate -> Mailbox -> Fifo.
 // Falls back to Fifo which is guaranteed by the Vulkan spec.
 func resolvePresentMode(caps *wgpu.SurfaceCapabilities, vsync bool) gputypes.PresentMode {
+	return resolvePresentModeFor(caps, vsync, false)
+}
+
+// resolvePresentModeFor is resolvePresentMode with the low-latency VSync
+// preference: Mailbox -> FifoRelaxed -> Fifo when vsync and lowLatency are set.
+func resolvePresentModeFor(caps *wgpu.SurfaceCapabilities, vsync, lowLatency bool) gputypes.PresentMode {
 	if caps == nil {
 		// No capabilities available — use safe default.
 		mode := gputypes.PresentModeFifo
@@ -467,7 +477,14 @@ func resolvePresentMode(caps *wgpu.SurfaceCapabilities, vsync bool) gputypes.Pre
 	supported := caps.PresentModes
 	var mode gputypes.PresentMode
 
-	if vsync {
+	if vsync && lowLatency {
+		// Low-latency VSync: tear-free newest-frame presentation first.
+		mode = pickPresentMode(supported,
+			gputypes.PresentModeMailbox,
+			gputypes.PresentModeFifoRelaxed,
+			gputypes.PresentModeFifo,
+		)
+	} else if vsync {
 		// VSync on: FifoRelaxed -> Fifo (like Rust AutoVsync).
 		mode = pickPresentMode(supported,
 			gputypes.PresentModeFifoRelaxed,
@@ -483,7 +500,7 @@ func resolvePresentMode(caps *wgpu.SurfaceCapabilities, vsync bool) gputypes.Pre
 	}
 
 	slog.Debug("gogpu: resolved present mode",
-		"mode", mode, "vsync", vsync, "supported", supported)
+		"mode", mode, "vsync", vsync, "lowLatency", lowLatency, "supported", supported)
 	return mode
 }
 

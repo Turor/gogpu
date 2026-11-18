@@ -53,6 +53,19 @@ type Config struct {
 	// VSync enables vertical synchronization.
 	VSync bool
 
+	// LowLatencyVSync prefers Mailbox presentation when VSync is on: the
+	// compositor shows the newest complete frame at each vblank (no tearing)
+	// and presentation never blocks the render thread. Fifo queues every frame
+	// and throttles in AcquireNextImage, which adds up to a full swapchain of
+	// latency and, on Wayland compositors pacing Fifo through wp_fifo_v1, can
+	// miss vblanks (40-45 FPS on a 60 Hz panel). Mailbox does not throttle, so
+	// pair it with MaxFPS. Falls back to FifoRelaxed, then Fifo.
+	LowLatencyVSync bool
+
+	// MaxFPS caps the continuous render loop. The loop sleeps before processing
+	// events, so each frame uses fresh input. Zero (default) disables the cap.
+	MaxFPS int
+
 	// Fullscreen starts in fullscreen mode.
 	Fullscreen bool
 
@@ -257,6 +270,23 @@ func (c Config) WithGraphicsAPI(api types.GraphicsAPI) Config {
 // When false: frames presented immediately without waiting for vblank.
 func (c Config) WithVSync(vsync bool) Config {
 	c.VSync = vsync
+	return c
+}
+
+// WithLowLatencyVSync prefers Mailbox over Fifo when VSync is on.
+// See Config.LowLatencyVSync.
+func (c Config) WithLowLatencyVSync(enabled bool) Config {
+	c.LowLatencyVSync = enabled
+	return c
+}
+
+// WithMaxFPS caps the continuous render loop at fps frames per second.
+// Zero or negative disables the cap. See also App.SetMaxFPS.
+func (c Config) WithMaxFPS(fps int) Config {
+	if fps < 0 {
+		fps = 0
+	}
+	c.MaxFPS = fps
 	return c
 }
 
