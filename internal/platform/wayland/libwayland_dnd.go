@@ -201,8 +201,8 @@ func dataDeviceDropCb(data, device uintptr) {
 	syscall.Close(writeFD)
 
 	// Read URI list from pipe with timeout.
+	// readDnDPipe owns readFD and closes it exactly once.
 	uriData, err := readDnDPipe(readFD, 5*time.Second)
-	syscall.Close(readFD)
 	if err != nil {
 		slog.Warn("wayland DnD: pipe read failed", "err", err)
 	}
@@ -315,6 +315,8 @@ func readDnDPipe(fd int, timeout time.Duration) ([]byte, error) {
 	if f == nil {
 		return nil, nil
 	}
+	// f owns fd; see readPipeWithTimeout for why it must be closed only here.
+	defer f.Close()
 
 	type result struct {
 		data []byte
@@ -331,7 +333,6 @@ func readDnDPipe(fd int, timeout time.Duration) ([]byte, error) {
 	case r := <-done:
 		return r.data, r.err
 	case <-time.After(timeout):
-		f.Close()
 		return nil, nil
 	}
 }

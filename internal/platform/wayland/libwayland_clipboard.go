@@ -545,8 +545,8 @@ func (h *LibwaylandHandle) ClipboardRead() (string, error) {
 	syscall.Close(writeFD)
 
 	// Read from pipe with timeout (data source writes then closes its end)
+	// readPipeWithTimeout owns readFD and closes it exactly once.
 	text, err := readPipeWithTimeout(readFD, 5*time.Second)
-	syscall.Close(readFD)
 	if err != nil {
 		return "", fmt.Errorf("wayland: clipboard read failed: %w", err)
 	}
@@ -601,8 +601,12 @@ func readPipeWithTimeout(fd int, timeout time.Duration) ([]byte, error) {
 	if f == nil {
 		return nil, fmt.Errorf("invalid fd")
 	}
-	// Note: we do NOT close f here — the caller closes the raw fd.
-	// os.NewFile does not take ownership when used this way.
+	// os.NewFile takes ownership of fd: the *os.File closes it (and a GC
+	// finalizer would close it again later). Close it only through f, once,
+	// so a raw syscall.Close elsewhere cannot leave a finalizer that later
+	// closes an unrelated descriptor (such as a game's TCP socket) that
+	// reused the same number.
+	defer f.Close()
 
 	type result struct {
 		data []byte
@@ -619,9 +623,7 @@ func readPipeWithTimeout(fd int, timeout time.Duration) ([]byte, error) {
 	case r := <-done:
 		return r.data, r.err
 	case <-time.After(timeout):
-		// Close the file to unblock the reading goroutine.
-		// This is safe — the goroutine will get an error and exit.
-		f.Close()
+		// The deferred f.Close unblocks the reading goroutine.
 		return nil, fmt.Errorf("timeout after %v", timeout)
 	}
 }
