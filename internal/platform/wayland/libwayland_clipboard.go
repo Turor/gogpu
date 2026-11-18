@@ -623,7 +623,10 @@ func readPipeWithTimeout(fd int, timeout time.Duration) ([]byte, error) {
 	case r := <-done:
 		return r.data, r.err
 	case <-time.After(timeout):
-		// The deferred f.Close unblocks the reading goroutine.
+		// The pipe is a blocking fd (not in the netpoller), so f.Close does
+		// not interrupt the read. The *os.File refcount defers the real close
+		// until the read returns, when the source closes its end. The fd is
+		// still closed exactly once, and its number is not reused meanwhile.
 		return nil, fmt.Errorf("timeout after %v", timeout)
 	}
 }

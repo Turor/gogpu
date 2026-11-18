@@ -333,6 +333,8 @@ func readDnDPipe(fd int, timeout time.Duration) ([]byte, error) {
 	case r := <-done:
 		return r.data, r.err
 	case <-time.After(timeout):
+		// See readPipeWithTimeout: the deferred close completes once the
+		// blocked read returns.
 		return nil, nil
 	}
 }

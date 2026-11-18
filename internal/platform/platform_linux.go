@@ -31,6 +31,17 @@ type xkbKeyHandler interface {
 	Close()
 }
 
+// loadCompositorKeymap loads a wl_keyboard.keymap fd into k. The client owns
+// the fd the compositor sent, so it is closed on every path, including when
+// the format is not XKB v1 or there is no keymap handler.
+func loadCompositorKeymap(k xkbKeyHandler, format uint32, fd int, size uint32) error {
+	defer func() { _ = unix.Close(fd) }()
+	if format != wayland.KeyboardKeymapFormatXKBV1 || k == nil {
+		return nil
+	}
+	return k.SetKeymapFromFD(fd, size)
+}
+
 // waylandWindow holds all per-window state for a Wayland surface.
 type waylandWindow struct {
 	// Frameless window state
@@ -1838,13 +1849,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 
 		// Keyboard events
 		OnKeyboardKeymap: func(format uint32, fd int, size uint32) {
-			if format != wayland.KeyboardKeymapFormatXKBV1 {
-				return
-			}
-			if w.xkb != nil {
-				if err := w.xkb.SetKeymapFromFD(fd, size); err != nil {
-					logger().Warn("xkbcommon: failed to load keymap from compositor", "err", err)
-				}
+			if err := loadCompositorKeymap(w.xkb, format, fd, size); err != nil {
+				logger().Warn("xkbcommon: failed to load keymap from compositor", "err", err)
 			}
 		},
 		OnKeyboardEnter: func(serial uint32, keys []uint32) {
