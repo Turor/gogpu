@@ -106,6 +106,7 @@ func (h *LibwaylandHandle) SetupCSD(subcompName, subcompVersion, shmName, shmVer
 		data, err := unix.Mmap(fd, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 		if err != nil {
 			unix.Close(fd)
+			h.csdFDs[i] = -1
 			return fmt.Errorf("csd: mmap [%d]: %w", i, err)
 		}
 		h.csdData[i] = data
@@ -117,6 +118,7 @@ func (h *LibwaylandHandle) SetupCSD(subcompName, subcompVersion, shmName, shmVer
 		if err != nil {
 			unix.Munmap(data)
 			unix.Close(fd)
+			h.csdFDs[i] = -1
 			return fmt.Errorf("csd: create_pool [%d]: %w", i, err)
 		}
 		h.csdPools[i] = pool
@@ -132,6 +134,7 @@ func (h *LibwaylandHandle) SetupCSD(subcompName, subcompVersion, shmName, shmVer
 		if err != nil {
 			unix.Munmap(data)
 			unix.Close(fd)
+			h.csdFDs[i] = -1
 			return fmt.Errorf("csd: create_buffer [%d]: %w", i, err)
 		}
 		h.csdBuffers[i] = buffer

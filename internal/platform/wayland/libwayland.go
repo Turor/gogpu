@@ -262,12 +262,18 @@ func (h *LibwaylandHandle) DisplayLock() { h.displayMu.Lock() }
 func (h *LibwaylandHandle) DisplayUnlock() { h.displayMu.Unlock() }
 
 // OpenLibwayland loads libwayland-client.so.0 and creates Vulkan-ready C pointers.
+// newLibwaylandHandle returns a handle with every CSD shm fd marked unused
+// (-1). A zero value would mean fd 0, which cleanup would then close.
+func newLibwaylandHandle() *LibwaylandHandle {
+	return &LibwaylandHandle{csdFDs: [4]int{-1, -1, -1, -1}}
+}
+
 // compositorName/Version and xdgWmBaseName/Version come from the pure Go Wayland
 // registry — global names are server-assigned and identical across all client connections.
 // The xdg-shell role is required for Vulkan presentation (without it, the compositor
 // won't composite the surface and vkQueuePresentKHR blocks forever).
 func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion uint32) (*LibwaylandHandle, error) {
-	h := &LibwaylandHandle{}
+	h := newLibwaylandHandle()
 
 	// Step 1: Load library
 	lib, err := ffi.LoadLibrary("libwayland-client.so.0")
